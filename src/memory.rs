@@ -33,7 +33,7 @@ impl Memory
 
         // PPU registers mirrors ($2000–$2007)
         if addr >= 0x2000 && addr < 0x4000 {
-            let addr = addr + (addr - 0x2000) % 8;
+            let addr = 0x2000 + (addr - 0x2000) % 8;
             return self.data[addr];
         }
 
@@ -49,20 +49,14 @@ impl Memory
         // Mirrors of $0000–$07FF
         if addr >= 0x800 && addr < 0x2000 {
             let addr = addr % 0x800;
-            self.data[addr] = val;
-            self.data[addr + 0x800] = val;
-            self.data[addr + 0x1000] = val;
-            self.data[addr + 0x1800] = val;
+            self.data[addr] = val;            
             return;
         }
 
         // PPU registers mirrors ($2000–$2007)
         if addr >= 0x2000 && addr < 0x4000 {
-            let mut addr = addr + (addr - 0x2000) % 8;
-            while addr < 0x4000 {
-                self.data[addr] = val;
-                addr += 8;
-            }
+            let addr = 0x2000 + (addr - 0x2000) % 8;
+            self.data[addr] = val;           
             return;
         }
 
