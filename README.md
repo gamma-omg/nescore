@@ -1,0 +1,2 @@
+# nescore
+NES emulation library 
