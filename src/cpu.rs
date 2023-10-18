@@ -1,4 +1,4 @@
-use crate::memory::Memory;
+use crate::bus::Bus;
 use self::addressing::{AddressMode, Value};
 
 mod addressing
@@ -18,7 +18,7 @@ mod addressing
         {
             match self {
                 Value::FromAccumulator => cpu.registers.A,
-                Value::AtAddress(addr) => cpu.memory.read8(*addr),
+                Value::AtAddress(addr) => cpu.bus.read8(*addr),
                 Value::Invalid => panic!("Unable to read: location is invalid")
             }
         }
@@ -27,7 +27,7 @@ mod addressing
         {
             match self {
                 Value::FromAccumulator => cpu.registers.A = val,
-                Value::AtAddress(addr) => cpu.memory.write8(*addr, val),
+                Value::AtAddress(addr) => cpu.bus.write8(*addr, val),
                 Value::Invalid => panic!("Unable to write: location is invalid")
             }
         }
@@ -77,14 +77,14 @@ mod addressing
                 }
                 AddressMode::Zp => {
                     AccessResult {
-                        value: Value::AtAddress(cpu.memory.read8(cpu.registers.PC) as u16),
+                        value: Value::AtAddress(cpu.bus.read8(cpu.registers.PC) as u16),
                         cycles: 3,
                         pc_offset: 1
                     }
                 },
                 AddressMode::Zpx => {
                     AccessResult {
-                        value: Value::AtAddress(cpu.memory.read8(cpu.registers.PC) as u16 + cpu.registers.X as u16),
+                        value: Value::AtAddress(cpu.bus.read8(cpu.registers.PC) as u16 + cpu.registers.X as u16),
                         cycles: 4,
                         pc_offset: 1
                     }
@@ -176,7 +176,7 @@ impl Registers
 
 pub struct CPU
 {
-    memory: Box<Memory>,
+    bus: Box<Bus>,
     registers: Registers,
     cycle: usize,
     op: Option<Op>
@@ -184,10 +184,10 @@ pub struct CPU
 
 impl CPU
 {
-    pub fn new(memory: Box<Memory>) -> CPU
+    pub fn new(bus: Box<Bus>) -> CPU
     {
         CPU {
-            memory: memory,
+            bus,
             registers: Registers {
                 PC: 0,
                 SP: 0,
@@ -228,7 +228,7 @@ impl CPU
 
     fn read_op(&mut self) -> Op
     {
-        let op_code = self.memory.read8(self.registers.PC);
+        let op_code = self.bus.read8(self.registers.PC);
         self.registers.PC += 1;
         let op_factory = instructions::OPCODE_MAP[op_code as usize];
         op_factory(self)
@@ -303,25 +303,25 @@ mod instructions
 #[cfg(test)]
 mod tests
 {
-    use crate::memory::Memory;
+    use crate::bus::Bus;
     use super::CPU;
 
-    fn from_program(program: Vec<u8>) -> CPU
+    fn load_program(program: Vec<u8>) -> CPU
     {
-        let mem = Memory::from_buffer(program);
-        CPU::new(Box::new(mem))
+        let mut bus = Bus::new();
+        bus.write_buffer(0, &program);
+        CPU::new(Box::new(bus))
     }
 
     mod adc
     {
         use std::vec;
-
-        use crate::cpu::{tests::from_program, StatusFlags};
+        use crate::cpu::{tests::load_program, StatusFlags};
 
         #[test]
         fn adc_imm()
         {
-            let mut cpu = from_program(vec![0x69, 0x02]);
+            let mut cpu = load_program(vec![0x69, 0x02]);
             cpu.ticks(2);
             assert_eq!(cpu.registers.A, 2);
         }
@@ -329,7 +329,7 @@ mod tests
         #[test]
         fn adc_imm_multiple()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0x02,
                 0x69, 0x03,
                 0x69, 0x04
@@ -343,7 +343,7 @@ mod tests
         #[test]
         fn adc_imm_z_flag_set()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0xFF,
                 0x69, 0x01
             ]);
@@ -356,7 +356,7 @@ mod tests
         #[test]
         fn adc_imm_z_flag_unset()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0x01,
                 0x69, 0x02
             ]);
@@ -369,7 +369,7 @@ mod tests
         #[test]
         fn adc_imm_v_flag_set()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0x7F,
                 0x69, 0x01
             ]);
@@ -383,7 +383,7 @@ mod tests
         #[test]
         fn adc_imm_v_flag_unset()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0x02,
                 0x69, 0x02
             ]);
@@ -396,7 +396,7 @@ mod tests
         #[test]
         fn adc_imm_n_flag_set()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0xF0,
                 0x69, 0x02
             ]);
@@ -409,7 +409,7 @@ mod tests
         #[test]
         fn adc_imm_n_flag_unset()
         {
-            let mut cpu = from_program(vec![
+            let mut cpu = load_program(vec![
                 0x69, 0x02,
                 0x69, 0x02
             ]);

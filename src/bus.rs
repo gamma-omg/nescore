@@ -1,23 +1,21 @@
-use std::{ffi::CStr, error::Error};
+use std::{ffi::{CStr, CString, OsString}, error::Error, vec, os::unix::prelude::{OsStrExt, OsStringExt}};
 
-pub struct Memory
+pub struct Bus
 {
-    data: Vec<u8>
+    ram: Vec<u8>,
+    ppu: Vec<u8>,
+    apu: Vec<u8>
 }
 
-impl Memory
+impl Bus
 {
-    pub fn new() -> Memory
+    pub fn new() -> Bus
     {
-        let mut buffer = Vec::new();
-        buffer.resize(0xFFFF, 0);
-        Memory { data: buffer }
-    }
-
-    pub fn from_buffer(mut initial: Vec<u8>) -> Memory 
-    {
-        initial.resize(0xFFFF, 0);
-        Memory { data: initial }
+        Bus {
+            ram: vec![0; 0x800],
+            ppu: vec![0; 8],
+            apu: vec![0; 18]
+        }        
     }
 
     #[inline(always)]
@@ -25,42 +23,72 @@ impl Memory
     {
         let addr = addr as usize;
 
-        // Mirrors of $0000–$07FF
-        if addr >= 0x800 && addr < 0x2000 {
+        // RAM
+        if addr < 0x2000 {
             let addr = addr % 0x800;
-            return self.data[addr];
+            return self.ram[addr];
         }
 
-        // PPU registers mirrors ($2000–$2007)
+        // PPU
         if addr >= 0x2000 && addr < 0x4000 {
-            let addr = 0x2000 + (addr - 0x2000) % 8;
-            return self.data[addr];
+            let addr = (addr - 0x2000) % 8;
+            return self.ppu[addr];
         }
 
-        self.data[addr]
+        // APU & I/O
+        if addr >= 0x4000 && addr < 0x4018 {
+            return self.apu[addr - 0x4000]
+        }
+
+        // CPU Test Mode
+        if addr >= 0x4018 && addr < 0x4020 {
+            todo!("CPU Test Mode is not implemented")
+        }
+
+        // Cartridge space
+        if addr >= 0x4020 {
+            todo!("Cartrige is not implemented")
+        }
+
+        panic!("Invalud address: {}", addr)
     }
 
     #[inline(always)]
     pub fn write8(&mut self, addr: u16, val: u8)
     {
         let addr = addr as usize;
-        self.data[addr] = val;
 
-        // Mirrors of $0000–$07FF
-        if addr >= 0x800 && addr < 0x2000 {
+        // RAM
+        if addr < 0x2000 {
             let addr = addr % 0x800;
-            self.data[addr] = val;            
+            self.ram[addr] = val;
             return;
         }
 
-        // PPU registers mirrors ($2000–$2007)
+        // PPU
         if addr >= 0x2000 && addr < 0x4000 {
-            let addr = 0x2000 + (addr - 0x2000) % 8;
-            self.data[addr] = val;           
+            let addr = (addr - 0x2000) % 8;
+            self.ppu[addr] = val;           
             return;
         }
 
-        self.data[addr] = val;
+        // APU & I/O
+        if addr >= 0x4000 && addr < 0x4018 {
+            self.apu[addr - 0x4000] = val;
+            return;
+        }
+
+        // CPU Test Mode
+        if addr >= 0x4018 && addr < 0x4020 {
+            todo!("CPU Test Mode is not implemented")
+        }
+
+        // Cartridge space
+        if addr >= 0x4020 {
+            todo!("Cartrige is not implemented")
+        }
+
+        panic!("Invalud address: {}", addr)
     }
 
     #[inline(always)]
@@ -79,10 +107,27 @@ impl Memory
     }
 
     #[inline(always)]
-    pub fn read_str(&self, addr: usize) -> Result<&str, Box<dyn Error>>
+    pub fn read_str(&self, addr: u16) -> Result<String, Box<dyn Error>>
     {
-        let cstr = CStr::from_bytes_until_nul(&self.data[addr..])?;
-        let str = cstr.to_str()?;
+        let mut buf = Vec::<u8>::new();
+        let mut offset: usize = 0;
+        loop {
+            let read_addr:usize = addr as usize + offset;
+            if read_addr > 0xFFFF {
+                panic!("Failed to read null terminated string at {}", addr)
+            }
+
+            let byte = self.read8(read_addr as u16);
+            if byte == 0 {
+                break;
+            }
+            
+            buf.push(byte);
+            offset += 1;
+        }
+
+        let ostr:OsString = OsStringExt::from_vec(buf);
+        let str = ostr.into_string().unwrap();
         Ok(str)
     }
     
@@ -110,12 +155,12 @@ mod tests
 {
     use std::ffi::CString;
 
-    use super::Memory;
+    use super::Bus;
 
     #[test]
     fn read8()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         mem.write8(0x100, 42);
         assert_eq!(42, mem.read8(0x100))
     }
@@ -123,7 +168,7 @@ mod tests
     #[test]
     fn read8_mirror()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         mem.write8(0x100, 42);
 
         assert_eq!(42, mem.read8(0x100));
@@ -135,7 +180,7 @@ mod tests
     #[test]
     fn read8_ppu_mirror()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         mem.write8(0x2002, 42);
 
         let mut addr = 0x2002;
@@ -148,7 +193,7 @@ mod tests
     #[test]
     fn read16()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         mem.write16(0x400, 0x1234);
 
         assert_eq!(0x1234, mem.read16(0x400))
@@ -157,7 +202,7 @@ mod tests
     #[test]
     fn write16()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         mem.write16(0x400, 0x1234);
 
         assert_eq!(0x34, mem.read8(0x400));
@@ -167,7 +212,7 @@ mod tests
     #[test]
     fn read_string()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         let c_string = CString::new("Hello world!").unwrap();
         mem.write_buffer(0x200, c_string.as_bytes());
 
@@ -177,7 +222,7 @@ mod tests
     #[test]
     fn write_buffer()
     {
-        let mut mem = Memory::new();
+        let mut mem = Bus::new();
         mem.write_buffer(0x600, &vec![0x01, 0x02, 0x03]);
         
         let mut out = vec![0; 3];
